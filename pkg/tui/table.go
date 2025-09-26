@@ -12,14 +12,16 @@ import (
 )
 
 const (
-	defaultColPad           = 1
-	defaultColWidth         = 80
-	worklogSubmitButton     = "Submit"
-	worklogCancelButton     = "Cancel"
-	worklogDoneButton       = "Done"
-	worklogFooterHint       = "Use TAB or ← → to navigate fields, ENTER to submit."
-	worklogFooterProcessing = "Processing. Please wait..."
-	worklogFooterReturn     = "Press ENTER or ESC to return to the issues list."
+	defaultColPad              = 1
+	defaultColWidth            = 80
+	worklogSubmitButton        = "Submit"
+	worklogCancelButton        = "Cancel"
+	worklogDoneButton          = "Done"
+	worklogFooterHint          = "Use TAB or ← → to navigate fields, ENTER to submit."
+	worklogFooterProcessing    = "Processing. Please wait..."
+	worklogFooterReturn        = "Press ENTER or ESC to return to the issues list."
+	worklogTimeSpentFieldWidth = 20
+	worklogCommentFieldHeight  = 5
 )
 
 var errNoData = fmt.Errorf("no data")
@@ -447,8 +449,8 @@ func (t *Table) initTable() {
 
 							t.action.SetText(fmt.Sprintf("Add a worklog to %s", worklog.Key))
 
-							form.AddInputField("Time spent", worklog.DefaultTimeSpent, 20, nil, nil)
-							form.AddTextArea("Comment", worklog.DefaultComment, 0, 5, 0, nil)
+							form.AddInputField("Time spent", worklog.DefaultTimeSpent, worklogTimeSpentFieldWidth, nil, nil)
+							form.AddTextArea("Comment", worklog.DefaultComment, 0, worklogCommentFieldHeight, 0, nil)
 
 							timeItem, _ := form.GetFormItem(0).(*tview.InputField)
 							commentItem, _ := form.GetFormItem(1).(*tview.TextArea)
