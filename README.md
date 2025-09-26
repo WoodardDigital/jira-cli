@@ -156,6 +156,7 @@ The lists are displayed in an interactive UI by default.
 - Use `CTRL + b` to scroll through a page in upwards direction.
 - Press `v` to view selected issue details.
 - Press `m` to transition the selected issue.
+- Press `w` to add a worklog to the selected issue.
 - Press `CTRL + r` or `F5` to refresh the issues list.
 - Hit `ENTER` to open the selected issue in the browser.
 - Press `c` to copy issue URL to the system clipboard. This requires `xclip` / `xsel` in linux.

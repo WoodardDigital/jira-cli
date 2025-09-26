@@ -12,8 +12,14 @@ import (
 )
 
 const (
-	defaultColPad   = 1
-	defaultColWidth = 80
+	defaultColPad              = 1
+	defaultColWidth            = 80
+	worklogSubmitButton        = "Submit"
+	worklogCancelButton        = "Cancel"
+	worklogFooterHint          = "Use TAB or ← → to navigate fields, ENTER to submit."
+	worklogFooterProcessing    = "Processing. Please wait..."
+	worklogTimeSpentFieldWidth = 20
+	worklogCommentFieldHeight  = 5
 )
 
 var errNoData = fmt.Errorf("no data")
@@ -35,6 +41,26 @@ type MoveHandlerFunc func(state string) error
 
 // MoveFunc is fired when a user press 'm' character in the table cell.
 type MoveFunc func(row, col int) func() (key string, actions []string, handler MoveHandlerFunc, status string, refresh RefreshTableStateFunc)
+
+// WorklogFunc is fired when a user press 'w' character in the table cell.
+type WorklogFunc func(row, col int) func() *WorklogForm
+
+// WorklogForm represents the data required to render a worklog modal.
+type WorklogForm struct {
+	Key              string
+	DefaultTimeSpent string
+	DefaultComment   string
+	Submit           WorklogSubmitFunc
+}
+
+// WorklogSubmitFunc processes a worklog submission.
+type WorklogSubmitFunc func(timeSpent, comment string) (WorklogResult, error)
+
+// WorklogResult describes the outcome of a worklog submission.
+type WorklogResult struct {
+	Message string
+	URL     string
+}
 
 // CopyFunc is fired when a user press 'c' character in the table cell.
 type CopyFunc func(row, column int, data interface{})
@@ -102,6 +128,7 @@ type Table struct {
 	refreshFunc  RefreshFunc
 	copyFunc     CopyFunc
 	copyKeyFunc  CopyKeyFunc
+	worklogFunc  WorklogFunc
 }
 
 // TableOption is a functional option to wrap table properties.
@@ -137,7 +164,10 @@ func NewTable(opts ...TableOption) *Table {
 
 	tbl.action.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyEsc || (ev.Key() == tcell.KeyRune && ev.Rune() == 'q') {
-			tbl.painter.HidePage("action")
+			tbl.screen.QueueUpdateDraw(func() {
+				tbl.painter.HidePage("action")
+				tbl.screen.SetFocus(tbl.view)
+			})
 		}
 		return ev
 	})
@@ -190,6 +220,13 @@ func WithViewModeFunc(fn ViewModeFunc) TableOption {
 func WithMoveFunc(fn MoveFunc) TableOption {
 	return func(t *Table) {
 		t.moveFunc = fn
+	}
+}
+
+// WithWorklogFunc sets a func that is triggered when a user press 'w'.
+func WithWorklogFunc(fn WorklogFunc) TableOption {
+	return func(t *Table) {
+		t.worklogFunc = fn
 	}
 }
 
@@ -374,6 +411,133 @@ func (t *Table) initTable() {
 									refreshFunc(r, c, btnLabel)
 									_ = t.Paint(t.data)
 								}
+							})
+						}()
+
+						// Refresh the screen.
+						t.screen.Draw()
+					}()
+				case 'w':
+					if t.worklogFunc == nil {
+						break
+					}
+
+					go func() {
+						var showAction bool
+
+						closeAction := func() {
+							if !showAction {
+								return
+							}
+
+							showAction = false
+							t.screen.QueueUpdateDraw(func() {
+								t.painter.HidePage("action")
+								t.screen.SetFocus(t.view)
+							})
+						}
+
+						func() {
+							t.painter.ShowPage("secondary").SendToFront("secondary")
+							defer func() {
+								t.painter.HidePage("secondary")
+								if showAction {
+									t.painter.ShowPage("action")
+								}
+							}()
+
+							r, c := t.view.GetSelection()
+							resolver := t.worklogFunc(r, c)
+							if resolver == nil {
+								return
+							}
+
+							worklog := resolver()
+							if worklog == nil || worklog.Key == "" || worklog.Submit == nil {
+								return
+							}
+
+							form := t.action.GetForm()
+							form.Clear(true).
+								SetFieldBackgroundColor(tcell.ColorSpecial).
+								SetFieldTextColor(tcell.ColorDefault).
+								SetLabelColor(tcell.ColorDefault)
+
+							t.action.SetText(fmt.Sprintf("Add a worklog to %s", worklog.Key))
+
+							form.AddInputField("Time spent", worklog.DefaultTimeSpent, worklogTimeSpentFieldWidth, nil, nil)
+							form.AddTextArea("Comment", worklog.DefaultComment, 0, worklogCommentFieldHeight, 0, nil)
+
+							timeItem, _ := form.GetFormItem(0).(*tview.InputField)
+							if timeItem != nil {
+								timeItem.SetFieldBackgroundColor(tcell.ColorSpecial).
+									SetFieldTextColor(tcell.ColorDefault).
+									SetBackgroundColor(tcell.ColorSpecial)
+							}
+
+							commentItem, _ := form.GetFormItem(1).(*tview.TextArea)
+							if commentItem != nil {
+								commentItem.SetPlaceholder("Optional comment").
+									SetPlaceholderStyle(tcell.StyleDefault.Foreground(tcell.ColorGray)).
+									SetTextStyle(tcell.StyleDefault.Foreground(tcell.ColorDefault))
+
+								commentItem.SetBackgroundColor(tcell.ColorSpecial)
+							}
+
+							t.action.ClearButtons().AddButtons([]string{worklogSubmitButton, worklogCancelButton})
+							form.SetFocus(0)
+							t.action.GetFooter().SetText(worklogFooterHint).SetTextColor(tcell.ColorGray)
+
+							showAction = true
+
+							t.action.SetDoneFunc(func(btnIndex int, btnLabel string) {
+								if btnIndex < 0 || btnLabel == worklogCancelButton {
+									closeAction()
+									return
+								}
+
+								if btnLabel != worklogSubmitButton {
+									return
+								}
+
+								if timeItem == nil {
+									return
+								}
+
+								timeSpent := strings.TrimSpace(timeItem.GetText())
+								if timeSpent == "" {
+									t.action.GetFooter().SetText("Time spent is required.").SetTextColor(tcell.ColorRed)
+									return
+								}
+
+								comment := ""
+								if commentItem != nil {
+									comment = commentItem.GetText()
+								}
+
+								t.action.GetFooter().SetText(worklogFooterProcessing).SetTextColor(tcell.ColorGray)
+								t.screen.ForceDraw()
+
+								result, err := worklog.Submit(timeSpent, comment)
+								if err != nil {
+									t.action.GetFooter().SetText(fmt.Sprintf("Error: %s", err.Error())).SetTextColor(tcell.ColorRed)
+									return
+								}
+
+								footerMessage := result.Message
+								if result.URL != "" {
+									footerMessage = fmt.Sprintf("%s • %s", footerMessage, result.URL)
+								}
+
+								form.Clear(true)
+
+								if footerMessage != "" {
+									t.screen.QueueUpdateDraw(func() {
+										t.footer.SetText(pad(fmt.Sprintf("%s\n%s", t.footerText, footerMessage), 1))
+									})
+								}
+
+								closeAction()
 							})
 						}()
 

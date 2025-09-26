@@ -8,9 +8,11 @@ import (
 	"text/tabwriter"
 
 	"github.com/ankitpokhrel/jira-cli/api"
+	"github.com/ankitpokhrel/jira-cli/internal/cmdutil"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira/filter/issue"
 	"github.com/ankitpokhrel/jira-cli/pkg/tui"
+	"github.com/spf13/viper"
 )
 
 // DisplayFormat is a issue display type.
@@ -127,6 +129,32 @@ func (l *IssueList) Render() error {
 				}
 			}
 			return dataFn
+		}),
+		tui.WithWorklogFunc(func(r, c int) func() *tui.WorklogForm {
+			return func() *tui.WorklogForm {
+				key := data[r][data.GetIndex(fieldKey)]
+				if key == "" {
+					return nil
+				}
+
+				client := api.DefaultClient(false)
+				server := viper.GetString("server")
+
+				return &tui.WorklogForm{
+					Key: key,
+					Submit: func(timeSpent, comment string) (tui.WorklogResult, error) {
+						if err := client.AddIssueWorklog(key, "", timeSpent, comment, ""); err != nil {
+							return tui.WorklogResult{}, fmt.Errorf("%s", cmdutil.NormalizeJiraError(err.Error()))
+						}
+
+						url := cmdutil.GenerateServerBrowseURL(server, key)
+						return tui.WorklogResult{
+							Message: fmt.Sprintf("Worklog added to issue %s", key),
+							URL:     url,
+						}, nil
+					},
+				}
+			}
 		}),
 		tui.WithRefreshFunc(l.Refresh),
 		tui.WithFixedColumns(l.Display.FixedColumns),
