@@ -1,15 +1,22 @@
 package view
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/AlecAivazis/survey/v2"
+	"github.com/AlecAivazis/survey/v2/terminal"
+	"github.com/spf13/viper"
+
 	"github.com/ankitpokhrel/jira-cli/api"
+	"github.com/ankitpokhrel/jira-cli/internal/cmdutil"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira/filter/issue"
+	"github.com/ankitpokhrel/jira-cli/pkg/surveyext"
 	"github.com/ankitpokhrel/jira-cli/pkg/tui"
 )
 
@@ -88,6 +95,7 @@ func (l *IssueList) Render() error {
 		}),
 		tui.WithCopyFunc(copyURL(l.Server)),
 		tui.WithCopyKeyFunc(copyKey()),
+		tui.WithWorklogFunc(logWork(l.Server)),
 		tui.WithMoveFunc(func(r, c int) func() (string, []string, tui.MoveHandlerFunc, string, tui.RefreshTableStateFunc) {
 			dataFn := func() (string, []string, tui.MoveHandlerFunc, string, tui.RefreshTableStateFunc) {
 				key := data[r][data.GetIndex(fieldKey)]
@@ -235,4 +243,115 @@ func (l *IssueList) assignColumns(columns []string, issue *jira.Issue) []string 
 	}
 
 	return bucket
+}
+
+func logWork(server string) tui.WorklogFunc {
+	return func(r, _ int, d any) tui.WorklogHandlerFunc {
+		key := issueKeyFromTuiData(r, d)
+		if key == "" {
+			return nil
+		}
+
+		return func() error {
+			fmt.Printf("\nLogging work for issue %s\n\n", key)
+
+			var timeSpent string
+			stop, err := handlePromptError(survey.AskOne(&survey.Input{
+				Message: "Time spent",
+				Help:    "Time to log as days (d), hours (h), or minutes (m), separated by space eg: 2d 1h 30m",
+			}, &timeSpent, survey.WithValidator(survey.Required)))
+			if err != nil || stop {
+				return err
+			}
+
+			var started string
+			stop, err = handlePromptError(survey.AskOne(&survey.Input{
+				Message: "Started (optional)",
+				Help:    "Datetime when the work started, eg: 2022-01-01 09:30:00 or 2022-01-01T09:30:00.000+0200",
+			}, &started))
+			if err != nil || stop {
+				return err
+			}
+
+			started = strings.TrimSpace(started)
+
+			timezone := ""
+			if started != "" {
+				defaultTimezone := viper.GetString("timezone")
+				if defaultTimezone == "" {
+					defaultTimezone = "UTC"
+				}
+
+				timezone = defaultTimezone
+
+				stop, err = handlePromptError(survey.AskOne(&survey.Input{
+					Message: "Timezone",
+					Help:    "Timezone in IANA format used when start date is provided, eg: Europe/Berlin",
+					Default: defaultTimezone,
+				}, &timezone))
+				if err != nil || stop {
+					return err
+				}
+			}
+
+			var newEstimate string
+			stop, err = handlePromptError(survey.AskOne(&survey.Input{
+				Message: "New estimate (optional)",
+				Help:    "Set a new remaining estimate, eg: 3h 30m",
+			}, &newEstimate))
+			if err != nil || stop {
+				return err
+			}
+
+			var comment string
+			stop, err = handlePromptError(survey.AskOne(&surveyext.JiraEditor{
+				Editor: &survey.Editor{
+					Message:       "Comment",
+					HideDefault:   true,
+					AppendDefault: true,
+				},
+				BlankAllowed: true,
+			}, &comment))
+			if err != nil || stop {
+				return err
+			}
+
+			timeSpent = strings.TrimSpace(timeSpent)
+			comment = strings.TrimSpace(comment)
+			newEstimate = strings.TrimSpace(newEstimate)
+
+			if started != "" {
+				formatted, ferr := cmdutil.DateStringToJiraFormatInLocation(started, strings.TrimSpace(timezone))
+				if ferr != nil {
+					cmdutil.Fail("Failed to parse start date: %s", ferr)
+					return ferr
+				}
+				started = formatted
+			}
+
+			client := api.DefaultClient(false)
+			if err := client.AddIssueWorklog(key, started, timeSpent, comment, newEstimate); err != nil {
+				cmdutil.Fail("Failed to add worklog: %s", err)
+				return err
+			}
+
+			cmdutil.Success("Worklog added to issue %q", key)
+			fmt.Printf("%s\n", cmdutil.GenerateServerBrowseURL(server, key))
+
+			return nil
+		}
+	}
+}
+
+func handlePromptError(err error) (bool, error) {
+	if err == nil {
+		return false, nil
+	}
+
+	if errors.Is(err, terminal.InterruptErr) {
+		cmdutil.Fail("Action aborted")
+		return true, nil
+	}
+
+	return false, err
 }

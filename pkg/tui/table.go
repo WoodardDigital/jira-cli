@@ -36,6 +36,12 @@ type MoveHandlerFunc func(state string) error
 // MoveFunc is fired when a user press 'm' character in the table cell.
 type MoveFunc func(row, col int) func() (key string, actions []string, handler MoveHandlerFunc, status string, refresh RefreshTableStateFunc)
 
+// WorklogHandlerFunc is a handler for worklog action.
+type WorklogHandlerFunc func() error
+
+// WorklogFunc is fired when a user press 'w' character in the table cell.
+type WorklogFunc func(row, col int, data interface{}) WorklogHandlerFunc
+
 // CopyFunc is fired when a user press 'c' character in the table cell.
 type CopyFunc func(row, column int, data interface{})
 
@@ -99,6 +105,7 @@ type Table struct {
 	selectedFunc SelectedFunc
 	viewModeFunc ViewModeFunc
 	moveFunc     MoveFunc
+	worklogFunc  WorklogFunc
 	refreshFunc  RefreshFunc
 	copyFunc     CopyFunc
 	copyKeyFunc  CopyKeyFunc
@@ -190,6 +197,13 @@ func WithViewModeFunc(fn ViewModeFunc) TableOption {
 func WithMoveFunc(fn MoveFunc) TableOption {
 	return func(t *Table) {
 		t.moveFunc = fn
+	}
+}
+
+// WithWorklogFunc sets a func that is triggered when a user press 'w'.
+func WithWorklogFunc(fn WorklogFunc) TableOption {
+	return func(t *Table) {
+		t.worklogFunc = fn
 	}
 }
 
@@ -378,6 +392,31 @@ func (t *Table) initTable() {
 						}()
 
 						// Refresh the screen.
+						t.screen.Draw()
+					}()
+				case 'w':
+					if t.worklogFunc == nil {
+						break
+					}
+
+					r, c := t.view.GetSelection()
+					handler := t.worklogFunc(r, c, t.data)
+					if handler == nil {
+						break
+					}
+
+					go func() {
+						var err error
+						t.screen.Suspend(func() {
+							err = handler()
+						})
+						if err != nil {
+							// Errors are reported by the handler itself. We redraw the
+							// screen to ensure the UI state is refreshed before
+							// returning to the table view.
+							t.screen.Draw()
+							return
+						}
 						t.screen.Draw()
 					}()
 				}
