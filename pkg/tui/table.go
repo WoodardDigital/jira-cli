@@ -16,10 +16,8 @@ const (
 	defaultColWidth            = 80
 	worklogSubmitButton        = "Submit"
 	worklogCancelButton        = "Cancel"
-	worklogDoneButton          = "Done"
 	worklogFooterHint          = "Use TAB or ← → to navigate fields, ENTER to submit."
 	worklogFooterProcessing    = "Processing. Please wait..."
-	worklogFooterReturn        = "Press ENTER or ESC to return to the issues list."
 	worklogTimeSpentFieldWidth = 20
 	worklogCommentFieldHeight  = 5
 )
@@ -526,20 +524,20 @@ func (t *Table) initTable() {
 									return
 								}
 
-								message := result.Message
+								footerMessage := result.Message
 								if result.URL != "" {
-									message = fmt.Sprintf("%s\n%s", message, result.URL)
+									footerMessage = fmt.Sprintf("%s • %s", footerMessage, result.URL)
 								}
 
 								form.Clear(true)
-								t.action.ClearButtons().AddButtons([]string{worklogDoneButton})
-								form.SetFocus(form.GetFormItemCount())
-								t.action.SetText(message)
-								t.action.GetFooter().SetText(worklogFooterReturn).SetTextColor(tcell.ColorGray)
 
-								t.action.SetDoneFunc(func(int, string) {
-									closeAction()
-								})
+								if footerMessage != "" {
+									t.screen.QueueUpdateDraw(func() {
+										t.footer.SetText(pad(fmt.Sprintf("%s\n%s", t.footerText, footerMessage), 1))
+									})
+								}
+
+								closeAction()
 							})
 						}()
 
