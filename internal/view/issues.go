@@ -7,7 +7,10 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/spf13/viper"
+
 	"github.com/ankitpokhrel/jira-cli/api"
+	"github.com/ankitpokhrel/jira-cli/internal/cmdutil"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira/filter/issue"
 	"github.com/ankitpokhrel/jira-cli/pkg/tui"
@@ -88,6 +91,7 @@ func (l *IssueList) Render() error {
 		}),
 		tui.WithCopyFunc(copyURL(l.Server)),
 		tui.WithCopyKeyFunc(copyKey()),
+		tui.WithWorklogFunc(logWork(l.Server)),
 		tui.WithMoveFunc(func(r, c int) func() (string, []string, tui.MoveHandlerFunc, string, tui.RefreshTableStateFunc) {
 			dataFn := func() (string, []string, tui.MoveHandlerFunc, string, tui.RefreshTableStateFunc) {
 				key := data[r][data.GetIndex(fieldKey)]
@@ -235,4 +239,61 @@ func (l *IssueList) assignColumns(columns []string, issue *jira.Issue) []string 
 	}
 
 	return bucket
+}
+
+func logWork(server string) tui.WorklogFunc {
+	return func(r, _ int, d any) *tui.WorklogHandler {
+		key := issueKeyFromTuiData(r, d)
+		if key == "" {
+			return nil
+		}
+
+		timezone := viper.GetString("timezone")
+		if timezone == "" {
+			timezone = "UTC"
+		}
+
+		handler := &tui.WorklogHandler{
+			IssueKey:  key,
+			BrowseURL: cmdutil.GenerateServerBrowseURL(server, key),
+			Defaults: tui.WorklogInput{
+				Timezone: timezone,
+			},
+		}
+
+		handler.Submit = func(input tui.WorklogInput) error {
+			timeSpent := strings.TrimSpace(input.TimeSpent)
+			if timeSpent == "" {
+				return fmt.Errorf("time spent is required")
+			}
+
+			started := strings.TrimSpace(input.Started)
+			tz := strings.TrimSpace(input.Timezone)
+			if started != "" {
+				if tz == "" {
+					tz = timezone
+				}
+				formatted, err := cmdutil.DateStringToJiraFormatInLocation(started, tz)
+				if err != nil {
+					return fmt.Errorf("failed to parse start date: %w", err)
+				}
+				started = formatted
+			}
+
+			client := api.DefaultClient(false)
+			if err := client.AddIssueWorklog(
+				key,
+				started,
+				timeSpent,
+				strings.TrimSpace(input.Comment),
+				strings.TrimSpace(input.NewEstimate),
+			); err != nil {
+				return fmt.Errorf("failed to add worklog: %w", err)
+			}
+
+			return nil
+		}
+
+		return handler
+	}
 }

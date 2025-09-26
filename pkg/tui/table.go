@@ -36,6 +36,29 @@ type MoveHandlerFunc func(state string) error
 // MoveFunc is fired when a user press 'm' character in the table cell.
 type MoveFunc func(row, col int) func() (key string, actions []string, handler MoveHandlerFunc, status string, refresh RefreshTableStateFunc)
 
+// WorklogInput captures values entered while logging work.
+type WorklogInput struct {
+	TimeSpent   string
+	Started     string
+	Timezone    string
+	NewEstimate string
+	Comment     string
+}
+
+// WorklogSubmitFunc executes the worklog submission.
+type WorklogSubmitFunc func(input WorklogInput) error
+
+// WorklogHandler represents an interactive worklog form for an issue.
+type WorklogHandler struct {
+	IssueKey  string
+	BrowseURL string
+	Defaults  WorklogInput
+	Submit    WorklogSubmitFunc
+}
+
+// WorklogFunc is fired when a user press 'w' character in the table cell.
+type WorklogFunc func(row, col int, data interface{}) *WorklogHandler
+
 // CopyFunc is fired when a user press 'c' character in the table cell.
 type CopyFunc func(row, column int, data interface{})
 
@@ -99,6 +122,7 @@ type Table struct {
 	selectedFunc SelectedFunc
 	viewModeFunc ViewModeFunc
 	moveFunc     MoveFunc
+	worklogFunc  WorklogFunc
 	refreshFunc  RefreshFunc
 	copyFunc     CopyFunc
 	copyKeyFunc  CopyKeyFunc
@@ -190,6 +214,13 @@ func WithViewModeFunc(fn ViewModeFunc) TableOption {
 func WithMoveFunc(fn MoveFunc) TableOption {
 	return func(t *Table) {
 		t.moveFunc = fn
+	}
+}
+
+// WithWorklogFunc sets a func that is triggered when a user press 'w'.
+func WithWorklogFunc(fn WorklogFunc) TableOption {
+	return func(t *Table) {
+		t.worklogFunc = fn
 	}
 }
 
@@ -380,6 +411,115 @@ func (t *Table) initTable() {
 						// Refresh the screen.
 						t.screen.Draw()
 					}()
+				case 'w':
+					if t.worklogFunc == nil {
+						break
+					}
+
+					r, c := t.view.GetSelection()
+					handler := t.worklogFunc(r, c, t.data)
+					if handler == nil || handler.Submit == nil {
+						break
+					}
+
+					const (
+						submitLabel = "Log Work"
+						cancelLabel = "Cancel"
+					)
+
+					t.painter.ShowPage("action").SendToFront("action")
+
+					form := t.action.GetForm()
+					form.Clear(true)
+					t.action.ClearButtons()
+
+					t.action.SetText(fmt.Sprintf("Log work for %s", handler.IssueKey))
+
+					instructions := "Use TAB/SHIFT+TAB to navigate fields, ENTER to activate buttons, ESC or Cancel to abort."
+					t.action.GetFooter().SetText(instructions).SetTextColor(tcell.ColorGray)
+
+					form.AddInputField("Time spent", handler.Defaults.TimeSpent, 0, nil, nil)
+					form.AddInputField("Started (optional)", handler.Defaults.Started, 0, nil, nil)
+					form.AddInputField("Timezone (if start set)", handler.Defaults.Timezone, 0, nil, nil)
+					form.AddInputField("New estimate (optional)", handler.Defaults.NewEstimate, 0, nil, nil)
+					form.AddTextArea("Comment", handler.Defaults.Comment, 0, 4, 0, nil)
+
+					timeSpentField := form.GetFormItem(0).(*tview.InputField)
+					timeSpentField.SetFieldWidth(30).SetPlaceholder("e.g. 2h 30m")
+
+					startedField := form.GetFormItem(1).(*tview.InputField)
+					startedField.SetFieldWidth(30).SetPlaceholder("2023-01-01 09:30")
+
+					timezoneField := form.GetFormItem(2).(*tview.InputField)
+					timezoneField.SetFieldWidth(30).SetPlaceholder("Europe/Berlin")
+
+					estimateField := form.GetFormItem(3).(*tview.InputField)
+					estimateField.SetFieldWidth(30).SetPlaceholder("e.g. 3h")
+
+					commentArea := form.GetFormItem(4).(*tview.TextArea)
+					commentArea.SetPlaceholder("Optional comment").SetSize(4, 0)
+
+					t.action.AddButtons([]string{submitLabel, cancelLabel})
+					form.SetFocus(0)
+
+					t.action.SetDoneFunc(func(btnIndex int, btnLabel string) {
+						if btnIndex < 0 || strings.EqualFold(btnLabel, cancelLabel) {
+							t.action.SetDoneFunc(nil)
+							t.painter.HidePage("action")
+							t.screen.Draw()
+							return
+						}
+
+						if !strings.EqualFold(btnLabel, submitLabel) {
+							return
+						}
+
+						input := WorklogInput{
+							TimeSpent:   strings.TrimSpace(timeSpentField.GetText()),
+							Started:     strings.TrimSpace(startedField.GetText()),
+							Timezone:    strings.TrimSpace(timezoneField.GetText()),
+							NewEstimate: strings.TrimSpace(estimateField.GetText()),
+							Comment:     strings.TrimSpace(commentArea.GetText()),
+						}
+
+						if input.TimeSpent == "" {
+							t.action.GetFooter().
+								SetText("Error: Time spent is required.").
+								SetTextColor(tcell.ColorRed)
+							t.screen.Draw()
+							return
+						}
+
+						t.action.GetFooter().
+							SetText("Processing. Please wait...").
+							SetTextColor(tcell.ColorGray)
+						t.screen.ForceDraw()
+
+						go func() {
+							err := handler.Submit(input)
+							t.screen.QueueUpdateDraw(func() {
+								if err != nil {
+									t.action.GetFooter().
+										SetText(fmt.Sprintf("Error: %s", err.Error())).
+										SetTextColor(tcell.ColorRed)
+									return
+								}
+
+								successMessage := fmt.Sprintf("Worklog added to issue %s", handler.IssueKey)
+								if handler.BrowseURL != "" {
+									successMessage = fmt.Sprintf("%s\n%s", successMessage, handler.BrowseURL)
+								}
+
+								footerText := fmt.Sprintf("%s\n%s", t.footerText, successMessage)
+								t.footer.SetText(pad(footerText, 1)).SetTextColor(tcell.ColorDefault)
+
+								t.action.SetDoneFunc(nil)
+								t.painter.HidePage("action")
+							})
+						}()
+					})
+
+					t.screen.Draw()
 				}
 			}
 			return ev
