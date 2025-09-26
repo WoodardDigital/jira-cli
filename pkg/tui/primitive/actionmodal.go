@@ -70,6 +70,11 @@ func (m *ActionModal) GetFooter() *tview.TextView {
 	return m.footer
 }
 
+// GetForm returns the form embedded in the modal.
+func (m *ActionModal) GetForm() *tview.Form {
+	return m.form
+}
+
 // SetBackgroundColor sets the color of the modal frame background.
 func (m *ActionModal) SetBackgroundColor(color tcell.Color) *ActionModal {
 	m.form.SetBackgroundColor(color)

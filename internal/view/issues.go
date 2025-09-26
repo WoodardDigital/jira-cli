@@ -4,12 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"os"s
 	"strings"
 	"text/tabwriter"
 
-	"github.com/AlecAivazis/survey/v2"
-	"github.com/AlecAivazis/survey/v2/terminal"
+
 	"github.com/spf13/viper"
 
 	"github.com/ankitpokhrel/jira-cli/api"
@@ -246,112 +245,61 @@ func (l *IssueList) assignColumns(columns []string, issue *jira.Issue) []string 
 }
 
 func logWork(server string) tui.WorklogFunc {
-	return func(r, _ int, d any) tui.WorklogHandlerFunc {
+
+	return func(r, _ int, d any) *tui.WorklogHandler {
 		key := issueKeyFromTuiData(r, d)
 		if key == "" {
 			return nil
 		}
 
-		return func() error {
-			fmt.Printf("\nLogging work for issue %s\n\n", key)
+		timezone := viper.GetString("timezone")
+		if timezone == "" {
+			timezone = "UTC"
+		}
 
-			var timeSpent string
-			stop, err := handlePromptError(survey.AskOne(&survey.Input{
-				Message: "Time spent",
-				Help:    "Time to log as days (d), hours (h), or minutes (m), separated by space eg: 2d 1h 30m",
-			}, &timeSpent, survey.WithValidator(survey.Required)))
-			if err != nil || stop {
-				return err
+		handler := &tui.WorklogHandler{
+			IssueKey:  key,
+			BrowseURL: cmdutil.GenerateServerBrowseURL(server, key),
+			Defaults: tui.WorklogInput{
+				Timezone: timezone,
+			},
+		}
+
+		handler.Submit = func(input tui.WorklogInput) error {
+			timeSpent := strings.TrimSpace(input.TimeSpent)
+			if timeSpent == "" {
+				return fmt.Errorf("time spent is required")
 			}
 
-			var started string
-			stop, err = handlePromptError(survey.AskOne(&survey.Input{
-				Message: "Started (optional)",
-				Help:    "Datetime when the work started, eg: 2022-01-01 09:30:00 or 2022-01-01T09:30:00.000+0200",
-			}, &started))
-			if err != nil || stop {
-				return err
-			}
-
-			started = strings.TrimSpace(started)
-
-			timezone := ""
+			started := strings.TrimSpace(input.Started)
+			tz := strings.TrimSpace(input.Timezone)
 			if started != "" {
-				defaultTimezone := viper.GetString("timezone")
-				if defaultTimezone == "" {
-					defaultTimezone = "UTC"
+				if tz == "" {
+					tz = timezone
 				}
+				formatted, err := cmdutil.DateStringToJiraFormatInLocation(started, tz)
+				if err != nil {
+					return fmt.Errorf("failed to parse start date: %w", err)
 
-				timezone = defaultTimezone
-
-				stop, err = handlePromptError(survey.AskOne(&survey.Input{
-					Message: "Timezone",
-					Help:    "Timezone in IANA format used when start date is provided, eg: Europe/Berlin",
-					Default: defaultTimezone,
-				}, &timezone))
-				if err != nil || stop {
-					return err
-				}
-			}
-
-			var newEstimate string
-			stop, err = handlePromptError(survey.AskOne(&survey.Input{
-				Message: "New estimate (optional)",
-				Help:    "Set a new remaining estimate, eg: 3h 30m",
-			}, &newEstimate))
-			if err != nil || stop {
-				return err
-			}
-
-			var comment string
-			stop, err = handlePromptError(survey.AskOne(&surveyext.JiraEditor{
-				Editor: &survey.Editor{
-					Message:       "Comment",
-					HideDefault:   true,
-					AppendDefault: true,
-				},
-				BlankAllowed: true,
-			}, &comment))
-			if err != nil || stop {
-				return err
-			}
-
-			timeSpent = strings.TrimSpace(timeSpent)
-			comment = strings.TrimSpace(comment)
-			newEstimate = strings.TrimSpace(newEstimate)
-
-			if started != "" {
-				formatted, ferr := cmdutil.DateStringToJiraFormatInLocation(started, strings.TrimSpace(timezone))
-				if ferr != nil {
-					cmdutil.Fail("Failed to parse start date: %s", ferr)
-					return ferr
 				}
 				started = formatted
 			}
 
 			client := api.DefaultClient(false)
-			if err := client.AddIssueWorklog(key, started, timeSpent, comment, newEstimate); err != nil {
-				cmdutil.Fail("Failed to add worklog: %s", err)
-				return err
-			}
 
-			cmdutil.Success("Worklog added to issue %q", key)
-			fmt.Printf("%s\n", cmdutil.GenerateServerBrowseURL(server, key))
+			if err := client.AddIssueWorklog(
+				key,
+				started,
+				timeSpent,
+				strings.TrimSpace(input.Comment),
+				strings.TrimSpace(input.NewEstimate),
+			); err != nil {
+				return fmt.Errorf("failed to add worklog: %w", err)
+			}
 
 			return nil
 		}
-	}
-}
 
-func handlePromptError(err error) (bool, error) {
-	if err == nil {
-		return false, nil
+		return handler
 	}
-
-	if errors.Is(err, terminal.InterruptErr) {
-		cmdutil.Fail("Action aborted")
-		return true, nil
-	}
-
-	return false, err
 }
