@@ -52,6 +52,7 @@ const (
 * [yellow]CTRL + b[default] to scroll through a page upwards
 * [yellow]v[default] to view selected issue details
 * [yellow]m[default] to move/transition selected issue
+* [yellow]w[default] to add a worklog to the selected issue
 * [yellow]CTRL + r / F5[default] to refresh the issues list
 * [yellow]ENTER[default] to open the selected issue in the browser
 * [yellow]c[default] to copy issue URL to the system clipboard
