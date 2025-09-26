@@ -477,10 +477,10 @@ func (t *Table) initTable() {
 
 							showAction = true
 
-                                                        t.action.SetDoneFunc(func(btnIndex int, btnLabel string) {
-                                                                if btnIndex < 0 || btnLabel == worklogCancelButton {
-                                                                        showAction = false
-                                                                        t.painter.HidePage("action")
+							t.action.SetDoneFunc(func(btnIndex int, btnLabel string) {
+								if btnIndex < 0 || btnLabel == worklogCancelButton {
+									showAction = false
+									t.painter.HidePage("action")
 									return
 								}
 
@@ -522,11 +522,11 @@ func (t *Table) initTable() {
 								t.action.SetText(message)
 								t.action.GetFooter().SetText(worklogFooterReturn).SetTextColor(tcell.ColorGray)
 
-                                                                t.action.SetDoneFunc(func(int, string) {
-                                                                        showAction = false
-                                                                        t.painter.HidePage("action")
-                                                                })
-                                                        })
+								t.action.SetDoneFunc(func(int, string) {
+									showAction = false
+									t.painter.HidePage("action")
+								})
+							})
 						}()
 
 						// Refresh the screen.
