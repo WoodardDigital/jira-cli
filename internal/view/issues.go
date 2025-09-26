@@ -4,10 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"s
+	"os"
 	"strings"
 	"text/tabwriter"
-
 
 	"github.com/spf13/viper"
 
