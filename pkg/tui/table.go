@@ -445,7 +445,10 @@ func (t *Table) initTable() {
 							}
 
 							form := t.action.GetForm()
-							form.Clear(true)
+							form.Clear(true).
+								SetFieldBackgroundColor(tcell.ColorSpecial).
+								SetFieldTextColor(tcell.ColorDefault).
+								SetLabelColor(tcell.ColorDefault)
 
 							t.action.SetText(fmt.Sprintf("Add a worklog to %s", worklog.Key))
 
@@ -453,9 +456,19 @@ func (t *Table) initTable() {
 							form.AddTextArea("Comment", worklog.DefaultComment, 0, worklogCommentFieldHeight, 0, nil)
 
 							timeItem, _ := form.GetFormItem(0).(*tview.InputField)
+							if timeItem != nil {
+								timeItem.SetFieldBackgroundColor(tcell.ColorSpecial).
+									SetFieldTextColor(tcell.ColorDefault).
+									SetBackgroundColor(tcell.ColorSpecial)
+							}
+
 							commentItem, _ := form.GetFormItem(1).(*tview.TextArea)
 							if commentItem != nil {
-								commentItem.SetPlaceholder("Optional comment")
+								commentItem.SetPlaceholder("Optional comment").
+									SetPlaceholderStyle(tcell.StyleDefault.Foreground(tcell.ColorGray)).
+									SetTextStyle(tcell.StyleDefault.Foreground(tcell.ColorDefault))
+
+								commentItem.SetBackgroundColor(tcell.ColorSpecial)
 							}
 
 							t.action.ClearButtons().AddButtons([]string{worklogSubmitButton, worklogCancelButton})
