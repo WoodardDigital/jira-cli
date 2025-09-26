@@ -166,7 +166,10 @@ func NewTable(opts ...TableOption) *Table {
 
 	tbl.action.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyEsc || (ev.Key() == tcell.KeyRune && ev.Rune() == 'q') {
-			tbl.painter.HidePage("action")
+			tbl.screen.QueueUpdateDraw(func() {
+				tbl.painter.HidePage("action")
+				tbl.screen.SetFocus(tbl.view)
+			})
 		}
 		return ev
 	})
@@ -424,6 +427,18 @@ func (t *Table) initTable() {
 					go func() {
 						var showAction bool
 
+						closeAction := func() {
+							if !showAction {
+								return
+							}
+
+							showAction = false
+							t.screen.QueueUpdateDraw(func() {
+								t.painter.HidePage("action")
+								t.screen.SetFocus(t.view)
+							})
+						}
+
 						func() {
 							t.painter.ShowPage("secondary").SendToFront("secondary")
 							defer func() {
@@ -479,8 +494,7 @@ func (t *Table) initTable() {
 
 							t.action.SetDoneFunc(func(btnIndex int, btnLabel string) {
 								if btnIndex < 0 || btnLabel == worklogCancelButton {
-									showAction = false
-									t.painter.HidePage("action")
+									closeAction()
 									return
 								}
 
@@ -518,13 +532,13 @@ func (t *Table) initTable() {
 								}
 
 								form.Clear(true)
-								t.action.ClearButtons().AddButtons([]string{worklogDoneButton}).SetFocus(0)
+								t.action.ClearButtons().AddButtons([]string{worklogDoneButton})
+								form.SetFocus(form.GetFormItemCount())
 								t.action.SetText(message)
 								t.action.GetFooter().SetText(worklogFooterReturn).SetTextColor(tcell.ColorGray)
 
 								t.action.SetDoneFunc(func(int, string) {
-									showAction = false
-									t.painter.HidePage("action")
+									closeAction()
 								})
 							})
 						}()
