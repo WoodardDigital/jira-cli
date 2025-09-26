@@ -517,7 +517,7 @@ func (t *Table) initTable() {
 								}
 
 								form.Clear(true)
-								t.action.ClearButtons().AddButtons([]string{worklogDoneButton})
+								t.action.ClearButtons().AddButtons([]string{worklogDoneButton}).SetFocus(0)
 								t.action.SetText(message)
 								t.action.GetFooter().SetText(worklogFooterReturn).SetTextColor(tcell.ColorGray)
 
