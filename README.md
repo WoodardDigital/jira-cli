@@ -417,7 +417,7 @@ $ jira issue move ISSUE-1 "In Progress" --comment "Started working on it"
 $ jira issue move ISSUE-1 Done -RFixed -a$(jira me)
 ```
 
-To transition the selected issue from the TUI, press `m`.
+To transition the selected issue from the TUI, press `m`. To log work for the selected issue, press `w`.
 
 #### View
 The `view` command lets you see issue details in a terminal. Atlassian document is roughly converted to a markdown
