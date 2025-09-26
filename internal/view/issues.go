@@ -1,13 +1,11 @@
 package view
 
 import (
-	"errors"
 	"fmt"
 	"io"
-	"os"s
+	"os"
 	"strings"
 	"text/tabwriter"
-
 
 	"github.com/spf13/viper"
 
@@ -15,7 +13,6 @@ import (
 	"github.com/ankitpokhrel/jira-cli/internal/cmdutil"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira/filter/issue"
-	"github.com/ankitpokhrel/jira-cli/pkg/surveyext"
 	"github.com/ankitpokhrel/jira-cli/pkg/tui"
 )
 
