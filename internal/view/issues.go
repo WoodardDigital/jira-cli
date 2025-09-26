@@ -1,11 +1,13 @@
 package view
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"os"
+	"os"s
 	"strings"
 	"text/tabwriter"
+
 
 	"github.com/spf13/viper"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/ankitpokhrel/jira-cli/internal/cmdutil"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira"
 	"github.com/ankitpokhrel/jira-cli/pkg/jira/filter/issue"
+	"github.com/ankitpokhrel/jira-cli/pkg/surveyext"
 	"github.com/ankitpokhrel/jira-cli/pkg/tui"
 )
 
@@ -242,6 +245,7 @@ func (l *IssueList) assignColumns(columns []string, issue *jira.Issue) []string 
 }
 
 func logWork(server string) tui.WorklogFunc {
+
 	return func(r, _ int, d any) *tui.WorklogHandler {
 		key := issueKeyFromTuiData(r, d)
 		if key == "" {
@@ -276,11 +280,13 @@ func logWork(server string) tui.WorklogFunc {
 				formatted, err := cmdutil.DateStringToJiraFormatInLocation(started, tz)
 				if err != nil {
 					return fmt.Errorf("failed to parse start date: %w", err)
+
 				}
 				started = formatted
 			}
 
 			client := api.DefaultClient(false)
+
 			if err := client.AddIssueWorklog(
 				key,
 				started,

@@ -418,6 +418,7 @@ func (t *Table) initTable() {
 
 					r, c := t.view.GetSelection()
 					handler := t.worklogFunc(r, c, t.data)
+
 					if handler == nil || handler.Submit == nil {
 						break
 					}
@@ -520,6 +521,7 @@ func (t *Table) initTable() {
 					})
 
 					t.screen.Draw()
+
 				}
 			}
 			return ev
