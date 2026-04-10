@@ -378,6 +378,48 @@ func (c *Client) AddIssueWorklog(key, started, timeSpent, comment, newEstimate s
 	return nil
 }
 
+// FieldOption represents an allowed value for an option-type custom field.
+type FieldOption struct {
+	ID    string `json:"id"`
+	Value string `json:"value"`
+}
+
+// GetIssueFieldOptions returns the allowed values for a given custom field on an issue
+// using the GET /issue/{key}/editmeta endpoint. Returns nil if the field has no
+// allowed values or if the endpoint is unavailable.
+func (c *Client) GetIssueFieldOptions(issueKey, fieldID string) ([]FieldOption, error) {
+	path := fmt.Sprintf("/issue/%s/editmeta", issueKey)
+
+	res, err := c.GetV2(context.Background(), path, Header{
+		"Accept": "application/json",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, ErrEmptyResponse
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, formatUnexpectedResponse(res)
+	}
+
+	var out struct {
+		Fields map[string]struct {
+			AllowedValues []FieldOption `json:"allowedValues"`
+		} `json:"fields"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+
+	if field, ok := out.Fields[fieldID]; ok {
+		return field.AllowedValues, nil
+	}
+	return nil, nil
+}
+
 // GetField gets all fields configured for a Jira instance using GET /field endpiont.
 func (c *Client) GetField() ([]*Field, error) {
 	res, err := c.GetV2(context.Background(), "/field", Header{

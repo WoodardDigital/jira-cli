@@ -128,6 +128,22 @@ func (l *IssueList) Render() error {
 			}
 			return dataFn
 		}),
+
+		tui.WithWorklogFunc(func(r, c int, data tui.TableData) (string, func(started, spent, comment string) error) {
+			keyIdx := data.GetIndex(fieldKey)
+			if r <= 0 || keyIdx < 0 {
+				return "", nil
+			}
+			issueKey := data.Get(r, keyIdx)
+			if issueKey == "" {
+				return "", nil
+			}
+			return issueKey, func(started, spent, comment string) error {
+				client := api.DefaultClient(false)
+				return client.AddIssueWorklog(issueKey, started, spent, comment, "")
+			}
+		}),
+
 		tui.WithRefreshFunc(l.Refresh),
 		tui.WithFixedColumns(l.Display.FixedColumns),
 	)

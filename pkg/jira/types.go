@@ -2,6 +2,7 @@ package jira
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 const (
@@ -70,6 +71,8 @@ type IssueFields struct {
 	Summary     string      `json:"summary"`
 	Description interface{} `json:"description"` // string in v1/v2, adf.ADF in v3
 	Labels      []string    `json:"labels"`
+	// CustomFields captures all customfield_* keys from the Jira API response.
+	CustomFields map[string]interface{} `json:"-"`
 	Resolution  struct {
 		Name string `json:"name"`
 	} `json:"resolution"`
@@ -126,6 +129,34 @@ type IssueFields struct {
 	Updated string `json:"updated"`
 }
 
+// UnmarshalJSON implements custom JSON deserialization for IssueFields.
+// In addition to the declared struct fields, it captures all customfield_* keys
+// from the Jira response into CustomFields for later use.
+func (f *IssueFields) UnmarshalJSON(data []byte) error {
+	type alias IssueFields
+	if err := json.Unmarshal(data, (*alias)(f)); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil // best-effort; don't fail on parse error
+	}
+	for k, v := range raw {
+		if !strings.HasPrefix(k, "customfield_") {
+			continue
+		}
+		var val interface{}
+		if err := json.Unmarshal(v, &val); err != nil || val == nil {
+			continue
+		}
+		if f.CustomFields == nil {
+			f.CustomFields = make(map[string]interface{})
+		}
+		f.CustomFields[k] = val
+	}
+	return nil
+}
+
 // Field holds field info.
 type Field struct {
 	ID     string `json:"id"`
@@ -147,6 +178,13 @@ type IssueTypeField struct {
 		Items    string `json:"items,omitempty"`
 	} `json:"schema"`
 	FieldID string `json:"fieldId,omitempty"`
+}
+
+// NewIssueTypeField constructs an IssueTypeField with the given name, Jira field key, and data type.
+func NewIssueTypeField(name, key, dataType string) IssueTypeField {
+	f := IssueTypeField{Name: name, Key: key}
+	f.Schema.DataType = dataType
+	return f
 }
 
 // IssueType holds issue type info.

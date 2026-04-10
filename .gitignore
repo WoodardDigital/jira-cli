@@ -2,11 +2,12 @@
 *.out
 *.swp
 /*.json
-
+.gitignore 
+CLAUDE.md
 .DS_Store
 .idea/
 .jira/
-
+jira
 dist/
 bin/
 coverage/
