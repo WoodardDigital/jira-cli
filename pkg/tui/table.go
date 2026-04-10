@@ -45,6 +45,11 @@ type CopyKeyFunc func(row, column int, data interface{})
 // TableData is the data to be displayed in a table.
 type TableData [][]string
 
+// WorklogFunc is fired when the user presses 'l' on a row.
+// It returns the issue key to log work against and a submit function.
+// Return an empty issueKey to abort.
+type WorklogFunc func(row, column int, data TableData) (issueKey string, onSubmit func(started, spent, comment string) error)
+
 // Get returns the value of the cell at the given row and column.
 func (td TableData) Get(r, c int) string {
 	if r != -1 && c != -1 {
@@ -102,6 +107,7 @@ type Table struct {
 	refreshFunc  RefreshFunc
 	copyFunc     CopyFunc
 	copyKeyFunc  CopyKeyFunc
+	worklogFunc  WorklogFunc
 }
 
 // TableOption is a functional option to wrap table properties.
@@ -219,6 +225,11 @@ func WithFixedColumns(cols uint) TableOption {
 	return func(t *Table) {
 		t.colFixed = cols
 	}
+}
+
+// WithWorklogFunc sets the worklog callback for the table.
+func WithWorklogFunc(fn WorklogFunc) TableOption {
+	return func(t *Table) { t.worklogFunc = fn }
 }
 
 // Paint paints the table layout. First row is treated as a table header.
@@ -380,6 +391,72 @@ func (t *Table) initTable() {
 						// Refresh the screen.
 						t.screen.Draw()
 					}()
+				case 'l':
+					if t.worklogFunc == nil {
+						break
+					}
+					r, c := t.view.GetSelection()
+					issueKey, onSubmit := t.worklogFunc(r, c, t.data)
+					if issueKey == "" {
+						break
+					}
+
+					status := tview.NewTextView().SetTextAlign(tview.AlignCenter).SetTextColor(tcell.ColorGray)
+					f := tview.NewForm().
+						AddInputField("Start Time (optional)", "", 30, nil, nil). //nolint:mnd
+						AddInputField("Time Spent (e.g. 1h30m)", "", 30, nil, nil). //nolint:mnd
+						AddInputField("Comment (optional)", "", 60, nil, nil)        //nolint:mnd
+
+					closeForm := func() {
+						t.painter.RemovePage("worklog_form")
+						// Draw must be dispatched from a separate goroutine to avoid
+						// deadlocking tview's QueueUpdate when called from an event
+						// callback (input capture or button handler).
+						go t.screen.Draw()
+					}
+
+					f.AddButton("Submit", func() {
+						started := strings.TrimSpace(f.GetFormItemByLabel("Start Time (optional)").(*tview.InputField).GetText())
+						spent := strings.TrimSpace(f.GetFormItemByLabel("Time Spent (e.g. 1h30m)").(*tview.InputField).GetText())
+						comment := strings.TrimSpace(f.GetFormItemByLabel("Comment (optional)").(*tview.InputField).GetText())
+						if spent == "" {
+							status.SetText("Time Spent is required").SetTextColor(tcell.ColorRed)
+							go t.screen.Draw()
+							return
+						}
+						status.SetText("Submitting...").SetTextColor(tcell.ColorGray)
+						go t.screen.Draw()
+						go func() {
+							err := onSubmit(started, spent, comment)
+							t.screen.QueueUpdateDraw(func() {
+								if err != nil {
+									status.SetText(fmt.Sprintf("Error: %s", err)).SetTextColor(tcell.ColorRed)
+								} else {
+									closeForm()
+								}
+							})
+						}()
+					})
+					f.AddButton("Cancel", closeForm)
+					f.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+						if ev.Key() == tcell.KeyEsc {
+							closeForm()
+							return nil
+						}
+						return ev
+					})
+
+					page := tview.NewFlex().SetDirection(tview.FlexRow).
+						AddItem(f, 0, 1, true).
+						AddItem(status, 1, 0, false)
+					page.SetBorder(true).
+						SetTitle(fmt.Sprintf(" Add Worklog: %s ", issueKey)).
+						SetTitleAlign(tview.AlignLeft)
+
+					t.painter.AddAndSwitchToPage("worklog_form", page, true)
+					go t.screen.Draw()
+					return nil
+
 				}
 			}
 			return ev

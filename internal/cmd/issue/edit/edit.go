@@ -18,6 +18,23 @@ import (
 	"github.com/ankitpokhrel/jira-cli/pkg/surveyext"
 )
 
+// incidentEditField defines one of the hardcoded incident custom fields.
+type incidentEditField struct {
+	Name       string // human-readable label
+	Key        string // Jira customfield_XXXXX ID
+	IsOption   bool   // true → fetch allowed values and show a select prompt
+	IsEditor   bool   // true → open in $EDITOR (nano) for multiline editing
+	Identifier string // hyphenated name used in CustomFields map
+}
+
+// incidentEditFields is the ordered list of incident fields shown in interactive edit.
+var incidentEditFields = []incidentEditField{
+	{"Severity", "customfield_12686", true, false, "severity"},
+	{"Associated Tickets", "customfield_14803", false, false, "associated-tickets"},
+	{"Executive Summary", "customfield_10504", false, true, "executive-summary"},
+	{"Service Incident", "customfield_14303", false, false, "service-incident"},
+}
+
 const (
 	helpText = `Edit an issue in a given project with minimal information.`
 	examples = `$ jira issue edit ISSUE-1
@@ -94,6 +111,7 @@ func edit(cmd *cobra.Command, args []string) {
 	}
 
 	cmdutil.ExitIfError(ec.askQuestions(issue, originalBody))
+	cmdutil.ExitIfError(ec.askIncidentFields(issue))
 
 	if !params.noInput {
 		getAnswers(params, issue)
@@ -112,26 +130,37 @@ func edit(cmd *cobra.Command, args []string) {
 		params.body = ""
 	}
 
-	labels := params.labels
-	labels = append(labels, issue.Fields.Labels...)
-
-	components := make([]string, 0, len(issue.Fields.Components)+len(params.components))
-	for _, c := range issue.Fields.Components {
-		components = append(components, c.Name)
+	// Only send labels when the user explicitly set --label flags.
+	// Sending the existing labels unconditionally causes a 400 when the
+	// labels field isn't on the edit screen for that issue type.
+	var labels []string
+	if len(params.labels) > 0 {
+		labels = append(params.labels, issue.Fields.Labels...)
 	}
-	components = append(components, params.components...)
 
-	fixVersions := make([]string, 0, len(issue.Fields.FixVersions)+len(params.fixVersions))
-	for _, fv := range issue.Fields.FixVersions {
-		fixVersions = append(fixVersions, fv.Name)
+	var components []string
+	if len(params.components) > 0 {
+		for _, c := range issue.Fields.Components {
+			components = append(components, c.Name)
+		}
+		components = append(components, params.components...)
 	}
-	fixVersions = append(fixVersions, params.fixVersions...)
 
-	affectsVersions := make([]string, 0, len(issue.Fields.AffectsVersions)+len(params.affectsVersions))
-	for _, fv := range issue.Fields.AffectsVersions {
-		affectsVersions = append(affectsVersions, fv.Name)
+	var fixVersions []string
+	if len(params.fixVersions) > 0 {
+		for _, fv := range issue.Fields.FixVersions {
+			fixVersions = append(fixVersions, fv.Name)
+		}
+		fixVersions = append(fixVersions, params.fixVersions...)
 	}
-	affectsVersions = append(affectsVersions, params.affectsVersions...)
+
+	var affectsVersions []string
+	if len(params.affectsVersions) > 0 {
+		for _, fv := range issue.Fields.AffectsVersions {
+			affectsVersions = append(affectsVersions, fv.Name)
+		}
+		affectsVersions = append(affectsVersions, params.affectsVersions...)
+	}
 
 	err = func() error {
 		s := cmdutil.Info("Updating an issue...")
@@ -159,10 +188,26 @@ func edit(cmd *cobra.Command, args []string) {
 			CustomFields:    params.customFields,
 			SkipNotify:      params.skipNotify,
 		}
-		if configuredCustomFields, err := cmdcommon.GetConfiguredCustomFields(); err == nil {
-			cmdcommon.ValidateCustomFields(edr.CustomFields, configuredCustomFields)
-			edr.WithCustomFields(configuredCustomFields)
+		configuredCustomFields, cfErr := cmdcommon.GetConfiguredCustomFields()
+		if cfErr != nil {
+			configuredCustomFields = nil
 		}
+		// Merge in the hardcoded incident field definitions so that values
+		// set via the interactive prompt (or --custom) are translated correctly.
+		for _, def := range incidentEditFields {
+			alreadyPresent := false
+			for _, cf := range configuredCustomFields {
+				if cf.Key == def.Key {
+					alreadyPresent = true
+					break
+				}
+			}
+			if !alreadyPresent {
+				configuredCustomFields = append(configuredCustomFields, jira.NewIssueTypeField(def.Name, def.Key, incidentFieldDataType(def)))
+			}
+		}
+		cmdcommon.ValidateCustomFields(edr.CustomFields, configuredCustomFields)
+		edr.WithCustomFields(configuredCustomFields)
 
 		return client.Edit(params.issueKey, &edr)
 	}()
@@ -249,6 +294,131 @@ func handleUserAssign(project, key, assignee string, client *jira.Client) {
 type editCmd struct {
 	client *jira.Client
 	params *editParams
+}
+
+// incidentFieldDataType returns the Jira schema data type string for an incident field.
+func incidentFieldDataType(def incidentEditField) string {
+	if def.IsOption {
+		return "option"
+	}
+	return "string"
+}
+
+// incidentFieldStringValue extracts a display string from a raw custom field value,
+// handling both plain strings and Jira option objects {"value": "..."}.
+func incidentFieldStringValue(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case map[string]interface{}:
+		if s, ok := val["value"].(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func (ec *editCmd) askIncidentFields(issue *jira.Issue) error {
+	if ec.params.noInput {
+		return nil
+	}
+
+	// Only show the prompt when at least one incident field has a value on this issue.
+	hasAny := false
+	for _, def := range incidentEditFields {
+		if issue.Fields.CustomFields[def.Key] != nil {
+			hasAny = true
+			break
+		}
+	}
+	if !hasAny {
+		return nil
+	}
+
+	var confirm bool
+	if err := survey.AskOne(&survey.Confirm{
+		Message: "Edit incident fields?",
+		Default: false,
+	}, &confirm); err != nil {
+		return err
+	}
+	if !confirm {
+		return nil
+	}
+
+	if ec.params.customFields == nil {
+		ec.params.customFields = make(map[string]string)
+	}
+
+	for _, def := range incidentEditFields {
+		current := incidentFieldStringValue(issue.Fields.CustomFields[def.Key])
+
+		if def.IsOption {
+			options, err := ec.client.GetIssueFieldOptions(ec.params.issueKey, def.Key)
+			if err != nil || len(options) == 0 {
+				// fall back to a plain text input if we can't fetch options
+				var answer string
+				if err := survey.AskOne(&survey.Input{
+					Message: def.Name,
+					Default: current,
+				}, &answer); err != nil {
+					return err
+				}
+				if answer != "" && answer != current {
+					ec.params.customFields[def.Identifier] = answer
+				}
+				continue
+			}
+
+			vals := make([]string, len(options))
+			for i, o := range options {
+				vals[i] = o.Value
+			}
+			var answer string
+			if err := survey.AskOne(&survey.Select{
+				Message: def.Name,
+				Options: vals,
+				Default: current,
+			}, &answer); err != nil {
+				return err
+			}
+			if answer != "" && answer != current {
+				ec.params.customFields[def.Identifier] = answer
+			}
+		} else if def.IsEditor {
+			var answer string
+			if err := survey.AskOne(&surveyext.JiraEditor{
+				Editor: &survey.Editor{
+					Message:       def.Name,
+					Default:       current,
+					HideDefault:   true,
+					AppendDefault: true,
+				},
+				BlankAllowed: true,
+			}, &answer); err != nil {
+				return err
+			}
+			if answer != "" && answer != current {
+				ec.params.customFields[def.Identifier] = md.ToJiraMD(answer)
+			}
+		} else {
+			var answer string
+			if err := survey.AskOne(&survey.Input{
+				Message: def.Name,
+				Default: current,
+			}, &answer); err != nil {
+				return err
+			}
+			if answer != "" && answer != current {
+				ec.params.customFields[def.Identifier] = answer
+			}
+		}
+	}
+
+	return nil
 }
 
 func (ec *editCmd) askQuestions(issue *jira.Issue, originalBody string) error {

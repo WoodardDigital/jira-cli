@@ -19,6 +19,37 @@ import (
 
 const defaultSummaryLength = 73 // +1 to take ellipsis '…' into account.
 
+// incidentField maps a human-readable label to a Jira customfield key.
+type incidentField struct {
+	Name string
+	Key  string
+}
+
+// incidentFieldDefs are the custom fields shown in the Incident Fields section.
+var incidentFieldDefs = []incidentField{
+	{"Severity", "customfield_12686"},
+	{"Associated Tickets", "customfield_14803"},
+	{"Executive Summary", "customfield_10504"},
+	{"Service Incident", "customfield_14303"},
+}
+
+// customFieldStringValue extracts a display string from a raw custom field value.
+// It handles plain strings and Jira option objects of the form {"value": "..."}.
+func customFieldStringValue(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return val
+	case map[string]interface{}:
+		if s, ok := val["value"].(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
 type fragment struct {
 	Body  string
 	Parse bool
@@ -109,6 +140,9 @@ func (i Issue) String() string {
 	if len(i.Data.Fields.IssueLinks) > 0 {
 		s.WriteString(fmt.Sprintf("\n\n%s\n\n%s\n", i.separator("Linked Issues"), i.linkedIssues()))
 	}
+	if sec := i.incidentSection(); sec != "" {
+		s.WriteString(fmt.Sprintf("\n\n%s\n%s", i.separator("Incident Fields"), sec))
+	}
 	total := i.Data.Fields.Comment.Total
 	if total > 0 && i.Options.NumComments > 0 {
 		sep := fmt.Sprintf("%d Comments", total)
@@ -156,6 +190,16 @@ func (i Issue) fragments() []fragment {
 			fragment{Body: i.separator("Linked Issues")},
 			newBlankFragment(2),
 			fragment{Body: i.linkedIssues()},
+			newBlankFragment(1),
+		)
+	}
+
+	if sec := i.incidentSection(); sec != "" {
+		scraps = append(
+			scraps,
+			newBlankFragment(1),
+			fragment{Body: i.separator("Incident Fields")},
+			fragment{Body: sec},
 			newBlankFragment(1),
 		)
 	}
@@ -418,6 +462,28 @@ func (i Issue) comments() []issueComment {
 	}
 
 	return comments
+}
+
+func (i Issue) incidentSection() string {
+	type kv struct{ name, value string }
+	var fields []kv
+
+	for _, def := range incidentFieldDefs {
+		val := customFieldStringValue(i.Data.Fields.CustomFields[def.Key])
+		if val != "" {
+			fields = append(fields, kv{def.Name, val})
+		}
+	}
+	if len(fields) == 0 {
+		return ""
+	}
+
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("\n %s\n\n", coloredOut("INCIDENT FIELDS", color.FgWhite, color.Bold)))
+	for _, f := range fields {
+		out.WriteString(fmt.Sprintf("  %s: %s\n", coloredOut(f.name, color.FgCyan, color.Bold), f.value))
+	}
+	return out.String()
 }
 
 func (i Issue) footer() string {
